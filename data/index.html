@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Positioning System</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Positioning System</h1>
+        
+        <ul class="status-list">
+            <li class="status-item">
+                <span class="status-label">Coordinates</span>
+                <span class="status-value" id="coordinates">X: 0, Y: 0</span>
+            </li>
+            <li class="status-item">
+                <span class="status-label">Accuracy</span>
+                <span class="status-value" id="accuracy">± 0 cm</span>
+            </li>
+        </ul>
+
+        <div class="controls">
+            <button id="btn-start" onclick="sendCommand('START')">▶ Start</button>
+            <button id="btn-stop" onclick="sendCommand('STOP')" disabled>⏹ Stop</button>
+        </div>
+
+        <div id="map" class="map">
+            <div id="object" class="object"></div>
+        </div>
+    </div>
+
+    <script src="./script.js"></script>
+</body>
+</html>

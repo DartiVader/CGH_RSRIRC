@@ -1,0 +1,7 @@
+[ДАТЧИКИ] → Новые координаты → [MAIN.CPP] → webService.updatePosition() 
+    ↓
+[WEB_SERVER] → Сохраняет данные → broadcastPosition() → getJSONPosition()
+    ↓  
+[JSON сообщение] → webSocket.textAll() → [ВСЕ КЛИЕНТЫ]
+    ↓
+[БРАУЗЕРЫ] → Получают данные → Отрисовывают на странице /
