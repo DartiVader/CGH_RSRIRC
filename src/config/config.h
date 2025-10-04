@@ -1,40 +1,44 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// === БЕЗОПАСНЫЕ ПИНЫ ДЛЯ ESP32 ===
-// ADC1 пины (безопасны с WiFi): 32, 33, 34, 35, 36, 37, 38, 39
-// ADC2 пины (конфликтуют с WiFi): 0, 2, 4, 12, 13, 14, 15, 25, 26, 27
-
-// Пины по умолчанию (будут переопределены в platformio.ini)
+// Пины по умолчанию
 #ifndef STATUS_LED_PIN
 #define STATUS_LED_PIN 2
 #endif
 
 #ifndef ULTRASOUND_TX_PIN
-#define ULTRASOUND_TX_PIN 25    // ADC2, но для маяков норм (они не читают аналог)
+#define ULTRASOUND_TX_PIN 25
 #endif
 
 #ifndef ULTRASOUND_RX_PIN
-#define ULTRASOUND_RX_PIN 36    // ADC1 - безопасно для ресивера с WiFi
+#define ULTRASOUND_RX_PIN 35
 #endif
 
-// Параметры сети
-#ifndef WIFI_SSID
+// Сеть
 #define WIFI_SSID "PositioningSystem"
-#endif
-
-#ifndef WIFI_PASSWORD
 #define WIFI_PASSWORD "password123"
-#endif
-
 #define UDP_PORT 1234
 
-// Позиции маяков (в см)
-const float BEACON_POSITIONS[3][2] = {
-    {0.0, 0.0},     // Маяк 1
-    {400.0, 0.0},   // Маяк 2
-    {200.0, 300.0}  // Маяк 3
-};
+// Параметры для разных узлов
+#ifdef RECEIVER_NODE
+#define SENSOR_TYPE "KY-037"
+#define NODE_TYPE "RECEIVER"
+
+#elif BEACON_NODE
+  #if BEACON_ID == 1
+  #define SENSOR_TYPE "KY-006+KY-037"
+  #define NODE_TYPE "BEACON_1"
+  #elif BEACON_ID == 2
+  #define SENSOR_TYPE "KY-012+KY-038"
+  #define NODE_TYPE "BEACON_2"
+  #endif
+
+#elif OBJECT_NODE
+#define SENSOR_TYPE "KY-006"
+#define NODE_TYPE "OBJECT"
+#define OBJECT_PULSE_INTERVAL 1000000  // 1 секунда между импульсами
+
+#endif
 
 // Физические параметры
 #define SOUND_SPEED 34300.0  // см/с

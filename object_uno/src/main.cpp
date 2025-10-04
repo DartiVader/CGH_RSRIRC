@@ -1,108 +1,90 @@
 #include <Arduino.h>
 
-#define TRANSISTOR_PIN 8
+// Конфигурация объекта
+#define ULTRASONIC_PIN 8
 #define STATUS_LED_PIN 13
-#define PULSE_INTERVAL 2000
+#define PULSE_INTERVAL 2000  // 2 секунды между импульсами
 
-// ОБЪЯВЛЯЕМ ФУНКЦИИ ДО ИХ ИСПОЛЬЗОВАНИЯ
-void emitFullPowerUltrasound();
-void emitUltrasound(unsigned long duration);
+// Параметры ШИМ
+const int pwmChannel = 0;
+const int pwmFrequency = 40000; // 40 kHz
+const int pwmResolution = 8;
+const int pwmDutyCycle = 127; // 50% заполнение
+
+// Код объекта (простой одиночный импульс)
+const int objectCode[] = {1};
+const int codeLength = 1;
+
+void setupPWM() {
+  // Настройка ШИМ для генерации 40 кГц
+  ledcSetup(pwmChannel, pwmFrequency, pwmResolution);
+  ledcAttachPin(ULTRASONIC_PIN, pwmChannel);
+  ledcWrite(pwmChannel, 0); // Выключаем сигнал
+
+  Serial.println("✅ PWM initialized: 40kHz on pin " + String(ULTRASONIC_PIN));
+}
+
+void generateTone(bool state) {
+  if (state) {
+    ledcWrite(pwmChannel, pwmDutyCycle);
+  } else {
+    ledcWrite(pwmChannel, 0);
+  }
+}
+
+void emitCodedPulse() {
+  Serial.println("🚀 EMITTING CODED ULTRASOUND PULSE");
+
+  const int pulseDuration = 15;    // Длительность импульса (мс)
+  const int betweenPulseDelay = 5; // Пауза между импульсами
+
+  for (int i = 0; i < codeLength; i++) {
+    for (int j = 0; j < objectCode[i]; j++) {
+      generateTone(true);
+      delay(pulseDuration);
+      generateTone(false);
+      if (j < objectCode[i] - 1) {
+        delay(betweenPulseDelay);
+      }
+    }
+  }
+
+  Serial.println("✅ Coded pulse completed");
+}
 
 void setup() {
-  pinMode(TRANSISTOR_PIN, OUTPUT);
   pinMode(STATUS_LED_PIN, OUTPUT);
   Serial.begin(115200);
 
-  Serial.println("=== 🎯 ULTRASOUND OBJECT - 3.3V POWER ===");
-  Serial.println("🔊 3.3V power - safe for 8Ω 1W speaker");
-  Serial.println("🚀 Full power ultrasound pulses");
+  Serial.println("=== 🎯 ULTRASOUND OBJECT - CODED PULSES ===");
+  Serial.println("🔊 40kHz PWM with coded identification");
+
+  setupPWM();
 }
 
 void loop() {
-  digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+  // Мигание светодиодом в режиме ожидания
+  static unsigned long lastBlink = 0;
+  if (millis() - lastBlink > 500) {
+    digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+    lastBlink = millis();
+  }
 
+  // Периодическая отправка кодированных импульсов
   static unsigned long lastPulse = 0;
   if (millis() - lastPulse > PULSE_INTERVAL) {
     lastPulse = millis();
 
-    emitFullPowerUltrasound();
+    emitCodedPulse();
+
+    // Быстрое мигание для подтверждения передачи
+    for(int i = 0; i < 3; i++) {
+      digitalWrite(STATUS_LED_PIN, HIGH);
+      delay(80);
+      digitalWrite(STATUS_LED_PIN, LOW);
+      delay(80);
+    }
   }
 
   delay(100);
-}
-
-void emitFullPowerUltrasound() {
-  Serial.println("🚀 FULL POWER ULTRASOUND PULSE");
-
-  // ПОЛНАЯ МОЩНОСТЬ - 100ms при 40kHz
-  unsigned long duration = 100000; // 100ms
-  unsigned long startTime = micros();
-  long cycleCount = 0;
-
-  while (micros() - startTime < duration) {
-    digitalWrite(TRANSISTOR_PIN, HIGH);
-    delayMicroseconds(500); // 40kHz
-    digitalWrite(TRANSISTOR_PIN, LOW);
-    delayMicroseconds(500);
-    cycleCount++;
-  }
-
-  Serial.print("🔊 100ms pulse, 40kHz, ");
-  Serial.print(cycleCount);
-  Serial.println(" cycles");
-
-  // Проверка температуры
-  static unsigned long pulseCount = 0;
-  pulseCount++;
-  if (pulseCount % 5 == 0) {
-    Serial.println("🌡️  Check speaker temperature");
-  }
-
-  // Мигание подтверждения
-  for(int i = 0; i < 3; i++) {
-    digitalWrite(STATUS_LED_PIN, HIGH);
-    delay(80);
-    digitalWrite(STATUS_LED_PIN, LOW);
-    delay(80);
-  }
-}
-
-void emitUltrasound(unsigned long duration) {
-  unsigned long start = micros();
-  long cycles = 0;
-
-  while(micros() - start < duration) {
-    digitalWrite(TRANSISTOR_PIN, HIGH);
-    delayMicroseconds(12);
-    digitalWrite(TRANSISTOR_PIN, LOW);
-    delayMicroseconds(12);
-    cycles++;
-  }
-
-  Serial.print("   ");
-  Serial.print(cycles);
-  Serial.println(" cycles");
-}
-
-// Функция для теста безопасности (не используется в loop, можно убрать если не нужна)
-void safetyTest() {
-  Serial.println("🧪 3.3V SAFETY TEST:");
-
-  // Тест 1: Короткий импульс
-  Serial.println("1. Short pulse test");
-  emitUltrasound(20000); // 20ms
-  delay(2000);
-
-  // Проверка температуры
-  Serial.println("2. Touch speaker - should be WARM but not HOT");
-  delay(3000);
-
-  // Тест 2: Длинный импульс
-  Serial.println("3. Long pulse test");
-  emitUltrasound(100000); // 100ms
-  delay(2000);
-
-  // Финальная проверка
-  Serial.println("4. Final temperature check");
-  Serial.println("✅ If not overheating - 3.3V is SAFE");
 }
