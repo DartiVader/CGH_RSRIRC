@@ -4,142 +4,369 @@
     box-sizing: border-box;
 }
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    padding: 20px;
-    color: #333;
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
 }
 
-.container {
-    max-width: 800px;
-    margin: 0 auto;
-    background: rgba(255, 255, 255, 0.95);
-    padding: 30px;
-    border-radius: 15px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+body {
+    font-family: 'Courier New', 'Monaco', 'Consolas', monospace;
+    background: #0a0f0a;
+    color: #64ffa5;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* Эффект сканирования как в терминале */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+      linear-gradient(rgba(10, 15, 10, 0.9) 50%, rgba(0, 0, 0, 0.9) 50%);
+    background-size: 100% 4px;
+    z-index: -1;
+    opacity: 0.1;
+    pointer-events: none;
+}
+
+/* Эффект мерцания */
+body::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    animation: flicker 0.15s infinite;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.02;
+}
+
+@keyframes flicker {
+    0%, 100% { opacity: 0.02; }
+    50% { opacity: 0.05; }
+}
+
+/* Основной контейнер приложения */
+.app-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: radial-gradient(ellipse at center, #0a1f0a 0%, #050a05 100%);
+    position: relative;
+}
+
+/* Шапка - фиксированная высота */
+.app-header {
+    flex: 0 0 auto;
+    padding: 15px 20px;
+    text-align: center;
+    background: rgba(5, 10, 5, 0.8);
+    border-bottom: 2px solid #64ffa5;
+    box-shadow: 0 0 20px rgba(100, 255, 165, 0.3);
 }
 
 h1 {
-    text-align: center;
-    margin-bottom: 30px;
-    color: #2c3e50;
-    font-size: 2.5em;
+    font-size: 2.2rem;
+    margin-bottom: 15px;
+    color: #64ffa5;
+    text-shadow:
+      0 0 10px #64ffa5,
+      0 0 20px #64ffa5;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    font-weight: 700;
 }
 
-.status-list {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-    margin-bottom: 25px;
-    background: #f8f9fa;
-    padding: 20px;
-    border-radius: 10px;
-    list-style: none;
-}
-
-.status-item {
+.status-panel {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid #e9ecef;
+    gap: 30px;
+    flex-wrap: wrap;
 }
 
-.status-item:last-child {
-    border-bottom: none;
-}
-
-.status-label {
-    font-weight: 600;
-    color: #495057;
-}
-
-.status-value {
+.status {
+    padding: 8px 20px;
+    border-radius: 4px;
     font-weight: bold;
-    color: #2c3e50;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border: 1px solid;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    min-width: 180px;
+}
+
+.status.connected {
+    background: rgba(100, 255, 165, 0.1);
+    color: #64ffa5;
+    border-color: #64ffa5;
+    box-shadow:
+      0 0 15px rgba(100, 255, 165, 0.5),
+      inset 0 0 10px rgba(100, 255, 165, 0.2);
+    text-shadow: 0 0 10px #64ffa5;
+}
+
+.status.disconnected {
+    background: rgba(255, 50, 50, 0.1);
+    color: #ff3232;
+    border-color: #ff3232;
+    box-shadow:
+      0 0 15px rgba(255, 50, 50, 0.3),
+      inset 0 0 10px rgba(255, 50, 50, 0.1);
+    text-shadow: 0 0 10px #ff3232;
+}
+
+#coordinates, #systemInfo {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 8px 15px;
+    background: rgba(10, 20, 10, 0.6);
+    border-radius: 4px;
+    border: 1px solid #64ffa5;
+}
+
+#coordinates {
+    color: #64ffa5;
+    text-shadow: 0 0 5px #64ffa5;
+}
+
+#systemInfo {
+    color: #b7fe65;
+    text-shadow: 0 0 5px #b7fe65;
+}
+
+/* Основная область - занимает всё доступное пространство */
+.app-main {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    min-height: 0; /* Важно для flexbox */
+}
+
+.radar-container {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    background: rgba(5, 10, 5, 0.9);
+    padding: 15px;
+    border-radius: 8px;
+    border: 2px solid #64ffa5;
+    box-shadow:
+      0 0 40px rgba(100, 255, 165, 0.4),
+      inset 0 0 40px rgba(100, 255, 165, 0.1);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.radar-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg,
+    transparent,
+    rgba(100, 255, 165, 0.1),
+    transparent
+    );
+    animation: scan 3s linear infinite;
+}
+
+@keyframes scan {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+#radarCanvas {
+    width: 100%;
+    height: 100%;
+    background: #050a05;
+    border-radius: 6px;
+    border: 1px solid #64ffa5;
+    box-shadow:
+      inset 0 0 30px rgba(0, 0, 0, 0.8),
+      0 0 30px rgba(100, 255, 165, 0.3);
+    display: block;
+}
+
+/* Подвал - фиксированная высота */
+.app-footer {
+    flex: 0 0 auto;
+    padding: 15px 20px;
+    background: rgba(5, 10, 5, 0.8);
+    border-top: 2px solid #64ffa5;
+    box-shadow: 0 0 20px rgba(100, 255, 165, 0.3);
 }
 
 .controls {
     text-align: center;
-    margin-bottom: 25px;
 }
 
 button {
-    padding: 12px 24px;
-    margin: 0 10px;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 600;
+    background: rgba(10, 20, 10, 0.8);
+    color: #64ffa5;
+    border: 2px solid #64ffa5;
+    padding: 12px 25px;
+    margin: 0 15px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 700;
     cursor: pointer;
     transition: all 0.3s ease;
-}
-
-button:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-}
-
-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-#btn-start {
-    background: #27ae60;
-    color: white;
-}
-
-#btn-stop {
-    background: #e74c3c;
-    color: white;
-}
-
-.map {
-    width: 100%;
-    height: 400px;
-    background: #ecf0f1;
-    border: 3px solid #bdc3c7;
-    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-family: 'Courier New', monospace;
     position: relative;
     overflow: hidden;
+    box-shadow:
+      0 0 15px rgba(100, 255, 165, 0.3),
+      inset 0 0 10px rgba(100, 255, 165, 0.1);
 }
 
-.object {
-    width: 24px;
-    height: 24px;
-    background: #e74c3c;
-    border: 3px solid white;
-    border-radius: 50%;
+button::before {
+    content: '';
     position: absolute;
-    display: none;
-    transition: all 0.5s ease;
-    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg,
+    transparent,
+    rgba(100, 255, 165, 0.2),
+    transparent
+    );
+    transition: left 0.6s;
 }
 
-.connected { color: #27ae60; }
-.disconnected { color: #e74c3c; }
+button:hover::before {
+    left: 100%;
+}
 
+button:hover {
+    background: rgba(100, 255, 165, 0.1);
+    box-shadow:
+      0 0 25px rgba(100, 255, 165, 0.6),
+      inset 0 0 15px rgba(100, 255, 165, 0.2);
+    text-shadow: 0 0 10px #64ffa5;
+    transform: translateY(-2px);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+/* Анимация мигающего курсора для статуса */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+.status.connected::after {
+    content: '|';
+    animation: blink 1s infinite;
+    margin-left: 5px;
+}
+
+/* Адаптивность для очень маленьких экранов */
 @media (max-width: 768px) {
-    .container {
-        padding: 15px;
-        margin: 10px;
+    .app-header {
+        padding: 10px 15px;
     }
-    
-    .status-list {
-        grid-template-columns: 1fr;
-        gap: 10px;
-        padding: 15px;
-    }
-    
+
     h1 {
-        font-size: 2em;
-        margin-bottom: 20px;
+        font-size: 1.5rem;
+        margin-bottom: 10px;
     }
-    
-    .map {
-        height: 300px;
+
+    .status-panel {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .status, #coordinates, #systemInfo {
+        font-size: 0.9rem;
+        min-width: auto;
+        width: 100%;
+        text-align: center;
+    }
+
+    .app-main {
+        padding: 10px;
+    }
+
+    .radar-container {
+        padding: 10px;
+    }
+
+    .app-footer {
+        padding: 10px 15px;
+    }
+
+    button {
+        padding: 10px 20px;
+        margin: 5px;
+        font-size: 0.8rem;
+        width: calc(50% - 10px);
+    }
+
+    .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+}
+
+/* Для очень высоких экранов */
+@media (min-height: 1200px) {
+    .app-header {
+        padding: 20px 30px;
+    }
+
+    h1 {
+        font-size: 2.5rem;
+    }
+
+    .status, #coordinates, #systemInfo {
+        font-size: 1.1rem;
+        padding: 12px 20px;
+    }
+
+    .app-footer {
+        padding: 20px 30px;
+    }
+
+    button {
+        padding: 15px 30px;
+        font-size: 1rem;
+    }
+}
+
+/* Для очень широких экранов */
+@media (min-width: 2000px) {
+    .app-container {
+        max-width: 2000px;
+        margin: 0 auto;
     }
 }
