@@ -200,45 +200,78 @@ void setup() {
 void testSpeaker() {
     Serial.println("🎵 Testing speaker...");
 
-    // Простой тест - 3 коротких сигнала
+    #ifdef BEACON_NODE
+    #if BEACON_ID == 1
+    Serial.println("   KY-006 Passive Buzzer Test");
+    // Тест для KY-006 - генерируем тон программно
     for(int i = 0; i < 3; i++) {
         digitalWrite(STATUS_LED_PIN, HIGH);
+        Serial.println("   Beep " + String(i+1) + " - Generating 40kHz");
+
+        // Генерируем 40kHz на 200ms
+        unsigned long startTime = micros();
+        while (micros() - startTime < 200000) { // 200ms
+            digitalWrite(ULTRASOUND_TX_PIN, HIGH);
+            delayMicroseconds(12);
+            digitalWrite(ULTRASOUND_TX_PIN, LOW);
+            delayMicroseconds(12);
+        }
+
+        digitalWrite(STATUS_LED_PIN, LOW);
+        delay(200);
+    }
+
+    #elif BEACON_ID == 2
+    Serial.println("   KY-012 Active Buzzer Test");
+    // Тест для KY-012 - используем ШИМ
+    for(int i = 0; i < 3; i++) {
+        digitalWrite(STATUS_LED_PIN, HIGH);
+        Serial.println("   Beep " + String(i+1) + " - PWM 40kHz");
 
         // Включаем ШИМ на 200ms
-        ledcWrite(0, 127); // 50% заполнение
+        ledcWrite(0, 127);
         delay(200);
-
-        // Выключаем ШИМ
         ledcWrite(0, 0);
-        digitalWrite(STATUS_LED_PIN, LOW);
 
+        digitalWrite(STATUS_LED_PIN, LOW);
         delay(200);
-        Serial.println("   Beep " + String(i+1));
     }
+    #endif
+    #endif
+
     Serial.println("✅ Speaker test completed");
 }
 
 // Простая функция излучения ультразвука
 void emitSimplePulse() {
-    Serial.println("🔊 SIMPLE PULSE - 40kHz for 100ms");
+    Serial.println("🔊 EMITTING ULTRASOUND PULSE");
 
-    unsigned long startTime = millis();
-    int pulseCount = 0;
+    #ifdef BEACON_NODE
+    #if BEACON_ID == 1
+    // KY-006 - пассивный зуммер
+    Serial.println("   KY-006: Software 40kHz generation");
+    unsigned long startTime = micros();
+    long cycleCount = 0;
 
-    // Генерируем 40kHz сигнал на 100ms
-    while (millis() - startTime < 100) {
-        ledcWrite(0, 127); // Включаем ШИМ
-        delayMicroseconds(12); // ~40kHz
-        ledcWrite(0, 0);   // Выключаем ШИМ
+    while (micros() - startTime < 100000) { // 100ms
+        digitalWrite(ULTRASOUND_TX_PIN, HIGH);
         delayMicroseconds(12);
-        pulseCount++;
+        digitalWrite(ULTRASOUND_TX_PIN, LOW);
+        delayMicroseconds(12);
+        cycleCount++;
     }
+    Serial.println("   Generated " + String(cycleCount) + " cycles");
 
-    Serial.println("   Generated " + String(pulseCount) + " pulses");
-
-    // Гарантируем выключение
-    ledcWrite(0, 0);
-}
+    #elif BEACON_ID == 2
+    // KY-012 - активный зуммер
+    Serial.println("   KY-012: PWM 40kHz");
+    ledcWrite(0, 127); // Включаем ШИМ
+    delay(100); // 100ms
+    ledcWrite(0, 0);   // Выключаем ШИМ
+    Serial.println("   PWM tone completed");
+    #endif
+    #endif
+}       
 
 void loop() {
     // Медленное мигание светодиодом в режиме ожидания
