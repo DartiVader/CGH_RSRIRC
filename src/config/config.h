@@ -1,7 +1,11 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Пины по умолчанию
+// ====================
+// БАЗОВЫЕ НАСТРОЙКИ ПИНОВ
+// ====================
+
+// Пины по умолчанию (для ESP32 узлов)
 #ifndef STATUS_LED_PIN
 #define STATUS_LED_PIN 2
 #endif
@@ -14,7 +18,9 @@
 #define ULTRASOUND_RX_PIN 35
 #endif
 
-// Сеть
+// ====================
+// НАСТРОЙКИ СЕТИ
+// ====================
 #define WIFI_SSID "PositioningSystem"
 #define WIFI_PASSWORD "password123"
 #define WIFI_CHANNEL 1
@@ -45,13 +51,22 @@ struct PositionData {
     bool valid = false;       // Валидность данных
 };
 
+// ====================
+// ФИЗИЧЕСКИЕ ПАРАМЕТРЫ
+// ====================
+#define SOUND_SPEED 34300.0  // см/с
 
-// Параметры для разных узлов
+// ====================
+// КОНФИГУРАЦИИ УЗЛОВ
+// ====================
+
 #ifdef RECEIVER_NODE
+// КОНФИГУРАЦИЯ ПРИЕМНИКА (ESP32)
 #define SENSOR_TYPE "KY-037"
 #define NODE_TYPE "RECEIVER"
 
 #elif BEACON_NODE
+// КОНФИГУРАЦИЯ МАЯКОВ (ESP32)
   #if BEACON_ID == 1
   #define SENSOR_TYPE "KY-006+KY-037"
   #define NODE_TYPE "BEACON_1"
@@ -61,13 +76,25 @@ struct PositionData {
   #endif
 
 #elif OBJECT_NODE
-#define SENSOR_TYPE "KY-006"
+// КОНФИГУРАЦИЯ ОБЪЕКТА (Arduino Uno с усилителем)
+#define SENSOR_TYPE "DYNAMIC+PAM8403"
 #define NODE_TYPE "OBJECT"
-#define OBJECT_PULSE_INTERVAL 1000000  // 1 секунда между импульсами
+
+// Переопределяем пины для Arduino Uno
+#undef STATUS_LED_PIN
+#undef ULTRASOUND_TX_PIN
+
+#define STATUS_LED_PIN 13
+#define ULTRASOUND_TX_PIN 8     // Подключен к L усилителя
+
+// Параметры ультразвуковых импульсов
+#define PULSE_DURATION 15       // длительность импульса в мс
+#define BETWEEN_PULSE_DELAY 10  // задержка между импульсами в мс
+
+// Идентификация объекта
+#define OBJECT_ID 3             // 3 импульса для идентификации
+#define OBJECT_PULSE_INTERVAL 2000  // 2 секунды между импульсами (в миллисекундах)
 
 #endif
-
-// Физические параметры
-#define SOUND_SPEED 34300.0  // см/с
 
 #endif
