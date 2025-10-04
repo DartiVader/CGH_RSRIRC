@@ -4,13 +4,12 @@ class CanvasRenderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.updateSize(); // Вызываем при создании
+    this.updateSize();
   }
 
   updateSize() {
-    // Получаем реальные размеры контейнера
     const container = this.canvas.parentElement;
-    this.canvas.width = container.clientWidth - 30; // Учитываем padding
+    this.canvas.width = container.clientWidth - 30;
     this.canvas.height = container.clientHeight - 30;
     this.width = this.canvas.width;
     this.height = this.canvas.height;
@@ -139,7 +138,7 @@ class CanvasRenderer {
   }
 
   reset() {
-    // Сброс рендерера
+    // реализовать сброс рендера
   }
 }
 

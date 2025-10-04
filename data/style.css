@@ -21,7 +21,6 @@ body {
     bottom: 0;
 }
 
-/* Эффект сканирования как в терминале */
 body::before {
     content: '';
     position: fixed;
@@ -57,7 +56,6 @@ body::after {
     50% { opacity: 0.05; }
 }
 
-/* Основной контейнер приложения */
 .app-container {
     width: 100vw;
     height: 100vh;
@@ -67,7 +65,6 @@ body::after {
     position: relative;
 }
 
-/* Шапка - фиксированная высота */
 .app-header {
     flex: 0 0 auto;
     padding: 15px 20px;
@@ -100,7 +97,6 @@ h1 {
 .status {
     padding: 8px 20px;
     border-radius: 4px;
-    font-weight: bold;
     font-size: 1rem;
     text-transform: uppercase;
     letter-spacing: 2px;
@@ -151,14 +147,13 @@ h1 {
     text-shadow: 0 0 5px #b7fe65;
 }
 
-/* Основная область - занимает всё доступное пространство */
 .app-main {
     flex: 1 1 auto;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    min-height: 0; /* Важно для flexbox */
+    min-height: 0;
 }
 
 .radar-container {
@@ -211,7 +206,6 @@ h1 {
     display: block;
 }
 
-/* Подвал - фиксированная высота */
 .app-footer {
     flex: 0 0 auto;
     padding: 15px 20px;
@@ -277,7 +271,6 @@ button:active {
     transform: translateY(0);
 }
 
-/* Анимация мигающего курсора для статуса */
 @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
@@ -289,7 +282,6 @@ button:active {
     margin-left: 5px;
 }
 
-/* Адаптивность для очень маленьких экранов */
 @media (max-width: 768px) {
     .app-header {
         padding: 10px 15px;
@@ -338,7 +330,6 @@ button:active {
     }
 }
 
-/* Для очень высоких экранов */
 @media (min-height: 1200px) {
     .app-header {
         padding: 20px 30px;
@@ -360,13 +351,5 @@ button:active {
     button {
         padding: 15px 30px;
         font-size: 1rem;
-    }
-}
-
-/* Для очень широких экранов */
-@media (min-width: 2000px) {
-    .app-container {
-        max-width: 2000px;
-        margin: 0 auto;
     }
 }

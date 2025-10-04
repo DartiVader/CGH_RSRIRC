@@ -1,4 +1,3 @@
-// js/RadarSystem.js
 import { CONFIG } from './Config.js';
 import CanvasRenderer from './CanvasRender.js';
 
