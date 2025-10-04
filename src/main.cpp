@@ -3,91 +3,83 @@
 #include "positioning/positioning.h"
 #include "network/wifi_manager.h"
 #include "hardware/ultrasound.h"
+#include "WIFI_App/WIFI_App.h"
 
+#include "web_server/web_server.h"
 // ===== РЕАЛИЗАЦИЯ РЕСИВЕРА =====
 #ifdef RECEIVER_NODE
 
 PositioningSystem positioning;
 WiFiManager wifi;
 Ultrasound ultrasound;
-
-void checkTDOA();
+WIFI_App wifiApp;
+WebService webService;
 
 // Переменные для TDOA
 unsigned long pulseArrivalTimes[3] = {0};
 bool pulseDetected[3] = {false};
-int detectionCount = 0;
-
-// Таймер для отправки START команд
-unsigned long lastStartCommand = 0;
-bool waitingForResponse = false;
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
 
     Serial.println("\n=== 🚀 POSITIONING SYSTEM - RECEIVER ===");
-    Serial.println("Mode: TDOA with moving object");
+    Serial.println("Mode: TDOA with Web Interface");
 
-    // Инициализация компонентов
+    // 1. Инициализация WiFi AP
+    Serial.println("📡 Starting WiFi Access Point...");
+    wifiApp.begin();
+
+    // 2. Инициализация веб-сервера
+    Serial.println("🌐 Starting Web Server...");
+    webService.begin();
+
+    // 3. Инициализация компонентов позиционирования
     positioning.begin();
-    wifi.setupAP();
-    Serial.println("✅ WiFi AP started");
-
     wifi.startUDP();
-    Serial.println("✅ UDP started");
-
     ultrasound.setupReceiver();
-    Serial.println("✅ Ultrasound receiver ready");
 
     // Настройка пинов
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
 
     Serial.println("✅ Receiver initialization completed!");
-    Serial.println("📡 Access Point: " + String(WIFI_SSID));
-    Serial.println("🌐 IP: " + WiFi.softAPIP().toString());
-    Serial.println("Connected stations: " + String(WiFi.softAPgetStationNum()));
+    Serial.println("📶 Connect to WiFi: " + String(WIFI_SSID));
+    Serial.println("🌐 Open in browser: http://" + WiFi.softAPIP().toString());
 }
 
 void loop() {
-    // Медленное мигание светодиодом
+    // Мигание светодиодом
     static unsigned long lastLedToggle = 0;
     if (millis() - lastLedToggle > 1000) {
         digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
         lastLedToggle = millis();
     }
 
-    static unsigned long lastSensorRead = 0;
-    static unsigned long lastPositionUpdate = 0;
-
-    // Автоматическая отправка START команды каждые 5 секунд
-    if (millis() - lastStartCommand > 5000) {
+    // Автоматическая отправка START команды если измерения активны
+    static unsigned long lastStartCommand = 0;
+    if (webService.isMeasuring() && millis() - lastStartCommand > 2000) {
         lastStartCommand = millis();
-        waitingForResponse = true;
 
         Serial.println("🔄 SENDING START COMMAND TO BEACONS...");
         wifi.sendUDPBroadcast("START");
 
         // Сбрасываем таймеры ожидания
         memset(pulseDetected, 0, sizeof(pulseDetected));
-        pulseDetected[0] = true; // Ресивер сам себя отмечает
         pulseArrivalTimes[0] = micros();
     }
 
     // Чтение значения сенсора
+    static unsigned long lastSensorRead = 0;
     if (millis() - lastSensorRead > 100) {
         lastSensorRead = millis();
 
-        // Детекция импульса от маяков
         if (ultrasound.detectPulse()) {
             unsigned long arrivalTime = micros();
             pulseArrivalTimes[0] = arrivalTime;
             pulseDetected[0] = true;
 
-            Serial.println("🎯 PULSE DETECTED ON RECEIVER! Time: " + String(arrivalTime));
-
-            // Отправляем запрос времени другим приемникам
+            Serial.println("🎯 PULSE DETECTED! Time: " + String(arrivalTime));
             wifi.sendUDPBroadcast("REQUEST_TIME:" + String(arrivalTime));
         }
     }
@@ -100,12 +92,8 @@ void loop() {
         if (len > 0) {
             packet[len] = 0;
             String message = String(packet);
-            String senderIP = wifi.udp.remoteIP().toString();
-
-            Serial.println("📨 UDP from " + senderIP + ": " + message);
 
             if (message.startsWith("BEACON_TIME:")) {
-                // Формат: BEACON_TIME:ID:TIME
                 int beaconId = message.substring(12, 13).toInt();
                 unsigned long beaconTime = message.substring(14).toInt();
 
@@ -114,24 +102,33 @@ void loop() {
 
                 Serial.println("📊 Beacon " + String(beaconId) + " time: " + String(beaconTime));
 
-                checkTDOA();
-            }
-            else if (message.startsWith("ACK_")) {
-                Serial.println("✅ Beacon acknowledged: " + message);
-                waitingForResponse = false;
-            }
-            else if (message == "START") {
-                // Игнорируем свои же сообщения
-                Serial.println("⚠️  Ignoring own START message");
+                // Проверяем TDOA
+                if (pulseDetected[0] && pulseDetected[1] && pulseDetected[2]) {
+                    Serial.println("🎯 TDOA CALCULATION POSSIBLE!");
+                    memset(pulseDetected, 0, sizeof(pulseDetected));
+                }
             }
         }
     }
 
-    // Обновление позиции каждые 3 секунды
-    if (millis() - lastPositionUpdate > 3000) {
+    // Обновление позиции и веб-интерфейса
+    static unsigned long lastPositionUpdate = 0;
+    if (millis() - lastPositionUpdate > 500) {
         lastPositionUpdate = millis();
+
         positioning.update();
         Position pos = positioning.getCurrentPosition();
+
+        // Конвертируем в структуру для веб-сервиса
+        PositionData webPos;
+        webPos.x = pos.x;
+        webPos.y = pos.y;
+        webPos.accuracy = pos.accuracy;
+        webPos.timestamp = millis();
+        webPos.valid = (pos.accuracy < 50.0);
+
+        // Обновляем веб-сервис
+        webService.updatePosition(webPos);
 
         Serial.printf("📍 Position: X=%.1fcm, Y=%.1fcm, Accuracy=%.1fcm\n",
                      pos.x, pos.y, pos.accuracy);
@@ -152,6 +149,9 @@ void checkTDOA() {
         long diff2 = pulseArrivalTimes[2] - pulseArrivalTimes[0];
 
         Serial.println("   Time differences: " + String(diff1) + "us, " + String(diff2) + "us");
+
+        // Здесь будет расчет позиции на основе TDOA
+        // Пока используем заглушку из positioning system
 
         // Сбрасываем флаги
         memset(pulseDetected, 0, sizeof(pulseDetected));
@@ -271,7 +271,7 @@ void emitSimplePulse() {
     Serial.println("   PWM tone completed");
     #endif
     #endif
-}       
+}
 
 void loop() {
     // Медленное мигание светодиодом в режиме ожидания

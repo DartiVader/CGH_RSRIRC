@@ -29,9 +29,9 @@ private:
     int sensorThreshold = 300;
 
     const int pwmChannel = 0;
-    const int pwmFrequency = 40000;
+    const int pwmFrequency = 2000;
     const int pwmResolution = 8;
-    const int pwmDutyCycle = 127;
+    const int pwmDutyCycle = 250;
 };
 
 #endif
