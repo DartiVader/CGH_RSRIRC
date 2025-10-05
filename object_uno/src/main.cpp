@@ -27,19 +27,19 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("\n=== 🎯 ARDUINO UNO - ULTRASOUND GENERATOR ===");
-  Serial.println("🔊 Amplifier: PAM8403");
-  Serial.println("📌 Ultrasound Pin: " + String(ULTRASONIC_PIN));
-  Serial.println("🤖 ESP32 Trigger Pin: " + String(ESP_TRIGGER_PIN));
-  Serial.println("📍 Object ID: " + String(OBJECT_ID_PULSES) + " pulses");
+  Serial.println("\n=== ARDUINO UNO - ULTRASOUND GENERATOR ===");
+  Serial.println("Amplifier: PAM8403");
+  Serial.println("Ultrasound Pin: " + String(ULTRASONIC_PIN));
+  Serial.println("ESP32 Trigger Pin: " + String(ESP_TRIGGER_PIN));
+  Serial.println("Object ID: " + String(OBJECT_ID_PULSES) + " pulses");
 
   // Тестовый сигнал
   testUltrasound();
-  Serial.println("\n✅ Arduino ready! Waiting for ESP32 commands...");
+  Serial.println("\nArduino ready! Waiting for ESP32 commands...");
 }
 
 void testUltrasound() {
-  Serial.println("🎵 Testing ultrasound generator...");
+  Serial.println("Testing ultrasound generator...");
   digitalWrite(STATUS_LED_PIN, HIGH);
 
   for(int i = 0; i < 2; i++) {
@@ -49,7 +49,7 @@ void testUltrasound() {
   }
 
   digitalWrite(STATUS_LED_PIN, LOW);
-  Serial.println("✅ Ultrasound test completed");
+  Serial.println("Ultrasound test completed");
 }
 
 void emitSinglePulse() {
@@ -64,11 +64,11 @@ void emitSinglePulse() {
 }
 
 void emitCodedPulse() {
-  Serial.println("🚀 EMITTING CODED ULTRASOUND");
+  Serial.println("EMITTING CODED ULTRASOUND");
   digitalWrite(STATUS_LED_PIN, HIGH);
 
   for (int i = 0; i < OBJECT_ID_PULSES; i++) {
-    Serial.println("   🔊 Pulse " + String(i+1) + "/" + String(OBJECT_ID_PULSES));
+    Serial.println("Pulse " + String(i+1) + "/" + String(OBJECT_ID_PULSES));
     emitSinglePulse();
 
     if (i < OBJECT_ID_PULSES - 1) {
@@ -77,7 +77,7 @@ void emitCodedPulse() {
   }
 
   digitalWrite(STATUS_LED_PIN, LOW);
-  Serial.println("✅ Coded pulse completed");
+  Serial.println("Coded pulse completed");
 }
 
 void checkEspCommand() {
@@ -86,7 +86,7 @@ void checkEspCommand() {
     if (!espCommandActive) {
       espCommandActive = true;
       lastCommandTime = millis();
-      Serial.println("🎯 ESP32 COMMAND RECEIVED!");
+      Serial.println("ESP32 COMMAND RECEIVED!");
       emitCodedPulse();
     }
   } else {
@@ -112,7 +112,7 @@ void loop() {
   static unsigned long lastAutoPulse = 0;
   if (millis() - lastAutoPulse > 5000 && !espCommandActive) { // Каждые 5 секунд
     lastAutoPulse = millis();
-    Serial.println("🔄 AUTO: Emitting pulse");
+    Serial.println("AUTO: Emitting pulse");
     emitCodedPulse();
   }
 
@@ -122,15 +122,15 @@ void loop() {
     command.trim();
 
     if (command == "TEST" || command == "t") {
-      Serial.println("🔊 MANUAL TEST");
+      Serial.println("MANUAL TEST");
       emitCodedPulse();
     } else if (command == "STATUS" || command == "s") {
       Serial.println("=== ARDUINO STATUS ===");
-      Serial.println("🔊 Ultrasound Pin: " + String(ULTRASONIC_PIN));
-      Serial.println("🤖 ESP32 Trigger: " + String(ESP_TRIGGER_PIN));
-      Serial.println("📍 Pulse Pattern: " + String(OBJECT_ID_PULSES));
-      Serial.println("📡 ESP Control: " + String(espCommandActive ? "ACTIVE" : "INACTIVE"));
-      Serial.println("🕒 Uptime: " + String(millis()/1000) + "s");
+      Serial.println("Ultrasound Pin: " + String(ULTRASONIC_PIN));
+      Serial.println("ESP32 Trigger: " + String(ESP_TRIGGER_PIN));
+      Serial.println("Pulse Pattern: " + String(OBJECT_ID_PULSES));
+      Serial.println("ESP Control: " + String(espCommandActive ? "ACTIVE" : "INACTIVE"));
+      Serial.println("Uptime: " + String(millis()/1000) + "s");
     } else if (command == "HELP" || command == "h") {
       Serial.println("=== ARDUINO COMMANDS ===");
       Serial.println("TEST/t - Manual test pulse");
