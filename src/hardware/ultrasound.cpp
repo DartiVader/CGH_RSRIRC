@@ -154,3 +154,54 @@ int Ultrasound::getSensorValue() {
 unsigned long Ultrasound::getLastPulseTime() {
     return pulseStartTime;
 }
+
+void Ultrasound::emitTestSound() {
+    Serial.println("🔊 MAX VOLUME TEST - 2kHz - SHOULD BE LOUD!");
+
+    // МАКСИМАЛЬНАЯ ГРОМКОСТЬ - прямой digital write
+    unsigned long startTime = millis();
+    unsigned long endTime = startTime + 1000; // 1 СЕКУНДА звука
+
+    while(millis() < endTime) {
+        digitalWrite(ULTRASOUND_TX_PIN, HIGH);
+        delayMicroseconds(250); // 2kHz = 500us period
+        digitalWrite(ULTRASOUND_TX_PIN, LOW);
+        delayMicroseconds(250);
+
+        // Диагностика каждые 100ms
+        if (millis() % 100 == 0) {
+            Serial.println("🔊 STILL EMITTING LOUD SOUND...");
+        }
+    }
+
+    Serial.println("✅ MAX VOLUME sound completed");
+}
+
+// Альтернативный метод - еще громче через PWM
+void Ultrasound::emitMaxVolumeSound() {
+    Serial.println("🔊 EXTREME VOLUME - 2kHz - WARNING LOUD!");
+
+    // Настройка PWM на максимальную мощность
+    #ifdef ESP32
+    ledcSetup(0, 2000, 8);      // 2kHz, 8-bit resolution
+    ledcAttachPin(ULTRASOUND_TX_PIN, 0);
+    ledcWrite(0, 255);          // 100% duty cycle - МАКСИМУМ!
+    #else
+    // Для других платформ - максимальный digital
+    for(int i = 0; i < 2000; i++) { // 2 секунды
+        digitalWrite(ULTRASOUND_TX_PIN, HIGH);
+        delayMicroseconds(250);
+        digitalWrite(ULTRASOUND_TX_PIN, LOW);
+        delayMicroseconds(250);
+    }
+    #endif
+
+    delay(1000); // Держим звук 1 секунду
+
+    #ifdef ESP32
+    ledcWrite(0, 0); // Выключаем
+    ledcDetachPin(ULTRASOUND_TX_PIN);
+    #endif
+
+    Serial.println("✅ EXTREME VOLUME completed");
+}

@@ -1,617 +1,611 @@
 #include <Arduino.h>
 
-// ===== РЕАЛИЗАЦИЯ РЕСИВЕРА =====
+// ===== РЕАЛИЗАЦИЯ ПРИЕМНИКА =====
 #ifdef RECEIVER_NODE
-
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include "config/config.h"
 #include "positioning/positioning.h"
-#include "network/wifi_manager.h"
-#include "hardware/ultrasound.h"
-#include "WIFI_App/WIFI_App.h"
 #include "web_server/web_server.h"
+#include "hardware/sensor_reader.h"
 
+WiFiUDP udp;
 PositioningSystem positioning;
-WiFiManager wifi;
-Ultrasound ultrasound;
-WIFI_App wifiApp;
 WebService webService;
+SensorReader receiverSensor;
 
-// Переменные для TDOA
-unsigned long pulseArrivalTimes[3] = {0};
-bool pulseDetected[3] = {false};
-unsigned long measurementStartTime = 0;
-bool measurementCycleActive = false;
+// Состояние системы
+bool measurementActive = false;
+unsigned long measurementStart = 0;
+int currentStep = 0;
 
-// Переменные для управления объектом
-unsigned long lastObjectCommand = 0;
-bool objectSoundEnabled = false;
-int measurementCount = 0;
+// Измеренные расстояния (2 маяка + объект)
+float measuredDistances[3] = {0}; // [beacon1, beacon2, object]
 
-void calculatePosition();
+// Функции для отправки команд
+void sendToBeacon(int beaconId, const String& message) {
+    IPAddress targetIP(192, 168, 4, 10 + beaconId); // beacon1: .11, beacon2: .12
+    udp.beginPacket(targetIP, UDP_PORT);
+    udp.print(message);
+    udp.endPacket();
+    Serial.println("Sent to Beacon " + String(beaconId) + ": " + message);
+}
+
+void sendToObject(const String& message) {
+    IPAddress targetIP(192, 168, 4, 20); // object: .20
+    udp.beginPacket(targetIP, UDP_PORT);
+    udp.print(message);
+    udp.endPacket();
+    Serial.println("Sent to Object: " + message);
+}
+
+void startMeasurement() {
+    if (measurementActive) {
+        Serial.println("Measurement already in progress");
+        return;
+    }
+
+    measurementActive = true;
+    measurementStart = millis();
+    currentStep = 0;
+    memset(measuredDistances, 0, sizeof(measuredDistances));
+
+    webService.updateMeasurementStatus(true);
+    webService.setActiveBeacon(1);
+
+    Serial.println("=== STARTING 2-BEACON MEASUREMENT CYCLE ===");
+    sendToBeacon(1, "START");
+}
+
+void stopMeasurement() {
+    measurementActive = false;
+    webService.updateMeasurementStatus(false);
+    webService.setActiveBeacon(-1);
+    Serial.println("Measurement stopped");
+}
+
+// Функция для детектирования импульсов приемником
+void handleReceiverDetection() {
+    if (receiverSensor.detectPulse(50000)) {
+        unsigned long detectionTime = receiverSensor.getLastPulseTime();
+        Serial.println("Receiver detected pulse - Time: " + String(detectionTime) + " μs, Amplitude: " + String(receiverSensor.getLastAmplitude()));
+    }
+}
+
+void processUDP() {
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+        char packet[50];
+        int len = udp.read(packet, sizeof(packet)-1);
+        if (len > 0) {
+            packet[len] = 0;
+            String message = String(packet);
+            String senderIP = udp.remoteIP().toString();
+
+            Serial.println("UDP from " + senderIP + ": " + message);
+
+            if (message.startsWith("BEACON_TIME:")) {
+                int beaconId = message.substring(12, 13).toInt();
+                unsigned long time = message.substring(14).toInt();
+
+                if (beaconId >= 1 && beaconId <= 2) {
+                    measuredDistances[beaconId-1] = (time / 1000000.0) * SOUND_SPEED;
+                    Serial.println("Beacon " + String(beaconId) + " distance: " + String(measuredDistances[beaconId-1]) + " cm");
+
+                    if (beaconId == 1 && currentStep == 0) {
+                        currentStep = 1;
+                        webService.setActiveBeacon(2);
+                        sendToBeacon(2, "START");
+                    }
+                    else if (beaconId == 2 && currentStep == 1) {
+                        currentStep = 2;
+                        webService.setActiveBeacon(0);
+                        sendToObject("START");
+                    }
+                }
+            }
+            else if (message.startsWith("OBJECT_TIME:")) {
+                unsigned long time = message.substring(12).toInt();
+                measuredDistances[2] = (time / 1000000.0) * SOUND_SPEED;
+                Serial.println("Object distance: " + String(measuredDistances[2]) + " cm");
+
+                Position objectPos = positioning.trilaterate(measuredDistances);
+
+                Serial.println("=== 2-BEACON POSITION CALCULATED ===");
+                Serial.println("X: " + String(objectPos.x) + " cm");
+                Serial.println("Y: " + String(objectPos.y) + " cm");
+                Serial.println("Accuracy: " + String(objectPos.accuracy) + " cm");
+
+                PositionData webPos;
+                webPos.x = objectPos.x;
+                webPos.y = objectPos.y;
+                webPos.accuracy = objectPos.accuracy;
+                webPos.timestamp = millis();
+                webPos.valid = (objectPos.accuracy < 50.0);
+
+                webService.updatePosition(webPos);
+                stopMeasurement();
+
+                Serial.println("=== 2-BEACON MEASUREMENT COMPLETED ===");
+            }
+        }
+    }
+}
+
+void setupWiFi() {
+    Serial.println("Starting WiFi Access Point...");
+
+    WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.softAPConfig(
+        IPAddress(192, 168, 4, 10),
+        IPAddress(192, 168, 4, 10),
+        IPAddress(255, 255, 255, 0)
+    );
+
+    delay(1000);
+
+    Serial.println("WiFi AP Started!");
+    Serial.println("SSID: " + String(WIFI_SSID));
+    Serial.println("IP: " + WiFi.softAPIP().toString());
+    Serial.println("MAC: " + WiFi.softAPmacAddress());
+}
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    Serial.println("\n=== 🚀 СИСТЕМА ПОЗИЦИОНИРОВАНИЯ - ПРИЕМНИК ===");
-    Serial.println("Режим: TDOA с веб-интерфейсом");
-    Serial.println("Версия: с управлением объектом");
+    Serial.println("=== 2-BEACON POSITIONING SYSTEM - RECEIVER NODE ===");
 
-    // 1. Инициализация WiFi AP
-    Serial.println("📡 Запуск точки доступа WiFi...");
-    wifiApp.begin();
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(STATUS_LED_PIN, LOW);
 
-    // 2. Инициализация веб-сервера
-    Serial.println("🌐 Запуск веб-сервера...");
+    setupWiFi();
+
+    udp.begin(UDP_PORT);
+    positioning.begin();
+    receiverSensor.begin(SENSOR_PIN, SENSOR_TYPE);
     webService.begin();
 
-    // 3. Инициализация компонентов позиционирования
-    Serial.println("🎯 Инициализация системы позиционирования...");
-    positioning.begin();
+    Serial.println("2-Beacon Receiver initialization completed!");
+    Serial.println("Available commands:");
+    Serial.println("   start  - Begin measurement cycle");
+    Serial.println("   stop   - Stop current measurement");
+    Serial.println("   status - System status");
+    Serial.println("   calibrate - Calibrate sensors");
+    Serial.println("   help   - Show this help");
 
-    Serial.println("📡 Запуск UDP...");
-    wifi.startUDP();
-
-    Serial.println("🎤 Настройка ультразвукового приемника...");
-    ultrasound.setupReceiver();
-
-    // Настройка пинов
-    pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
-
-    Serial.println("✅ Инициализация приемника завершена!");
-    Serial.println("📶 Подключитесь к WiFi: " + String(WIFI_SSID));
-    Serial.println("🌐 Откройте в браузере: http://" + WiFi.softAPIP().toString());
-    Serial.println("🎯 Система готова к измерениям");
-}
-
-void startMeasurementCycle() {
-    measurementCount++;
-    measurementCycleActive = true;
-    measurementStartTime = millis();
-
-    Serial.println("\n=== 🔄 ЦИКЛ ИЗМЕРЕНИЯ #" + String(measurementCount) + " ===");
-    Serial.println("🔄 ОТПРАВКА КОМАНД МАЯКАМ И ОБЪЕКТУ...");
-
-    // Сбрасываем таймеры ожидания
-    memset(pulseDetected, 0, sizeof(pulseDetected));
-    pulseArrivalTimes[0] = micros();
-
-    // Команда маякам
-    wifi.sendUDPBroadcast("START");
-    Serial.println("📡 Команда START отправлена маякам");
-
-    // Запланировать команду объекту через 500ms
-    objectSoundEnabled = true;
-    lastObjectCommand = millis();
-
-    Serial.println("⏳ Ожидание 500ms перед командой объекту...");
-}
-
-void processBeaconTime(int beaconId, unsigned long beaconTime) {
-    pulseArrivalTimes[beaconId] = beaconTime;
-    pulseDetected[beaconId] = true;
-
-    Serial.println("📊 Маяк " + String(beaconId) + " время: " + String(beaconTime) + " мкс");
-
-    // Проверяем готовность TDOA расчета
-    if (pulseDetected[0] && pulseDetected[1] && pulseDetected[2]) {
-        Serial.println("🎯 ВСЕ ДАННЫЕ ПОЛУЧЕНЫ - ВОЗМОЖЕН РАСЧЕТ TDOA!");
-        calculatePosition();
-    }
-}
-
-void calculatePosition() {
-    Serial.println("\n=== 🧮 РАСЧЕТ ПОЗИЦИИ ===");
-
-    // Выводим временные метки
-    Serial.println("   Приемник: " + String(pulseArrivalTimes[0]) + " мкс");
-    Serial.println("   Маяк 1: " + String(pulseArrivalTimes[1]) + " мкс");
-    Serial.println("   Маяк 2: " + String(pulseArrivalTimes[2]) + " мкс");
-
-    // Рассчитываем разницы времени
-    long diff1 = pulseArrivalTimes[1] - pulseArrivalTimes[0];
-    long diff2 = pulseArrivalTimes[2] - pulseArrivalTimes[0];
-
-    Serial.println("   Разницы времени: " + String(diff1) + " мкс, " + String(diff2) + " мкс");
-
-    // Преобразуем время в расстояния (скорость звука 34300 см/с)
-    float distance1 = (diff1 / 1000000.0) * 34300.0;
-    float distance2 = (diff2 / 1000000.0) * 34300.0;
-
-    Serial.println("   Расстояния: " + String(distance1) + " см, " + String(distance2) + " см");
-
-    // Используем систему позиционирования для расчета
-    float distances[3] = {0, distance1, distance2};
-    Position pos = positioning.trilaterate(distances);
-
-    // Конвертируем в структуру для веб-сервиса
-    PositionData webPos;
-    webPos.x = pos.x;
-    webPos.y = pos.y;
-    webPos.accuracy = pos.accuracy;
-    webPos.timestamp = millis();
-    webPos.valid = (pos.accuracy < 50.0);
-
-    // Обновляем веб-сервис
-    webService.updatePosition(webPos);
-
-    Serial.printf("📍 Позиция: X=%.1fсм, Y=%.1fсм, Точность=%.1fсм\n",
-                 pos.x, pos.y, pos.accuracy);
-
-    // Завершаем цикл измерений
-    measurementCycleActive = false;
-    memset(pulseDetected, 0, sizeof(pulseDetected));
-
-    Serial.println("✅ Цикл измерений завершен");
 }
 
 void loop() {
-    // Мигание светодиодом
-    static unsigned long lastLedToggle = 0;
-    if (millis() - lastLedToggle > 1000) {
+    processUDP();
+    handleReceiverDetection();
+
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+
+        if (cmd == "start") {
+            startMeasurement();
+        }
+        else if (cmd == "stop") {
+            stopMeasurement();
+        }
+        else if (cmd == "status") {
+            Position currentPos = positioning.getCurrentPosition();
+            Serial.println("=== 2-BEACON SYSTEM STATUS ===");
+            Serial.println("Position - X: " + String(currentPos.x) + " cm, Y: " + String(currentPos.y) + " cm");
+            Serial.println("Accuracy: " + String(currentPos.accuracy) + " cm");
+            Serial.println("Connected stations: " + String(WiFi.softAPgetStationNum()));
+            Serial.println("Measurement active: " + String(measurementActive ? "YES" : "NO"));
+            Serial.println("Current step: " + String(currentStep));
+            Serial.println("Uptime: " + String(millis()/1000) + "s");
+
+            Serial.println("Measured distances:");
+            Serial.println("  Beacon 1: " + String(measuredDistances[0]) + " cm");
+            Serial.println("  Beacon 2: " + String(measuredDistances[1]) + " cm");
+            Serial.println("  Object: " + String(measuredDistances[2]) + " cm");
+        }
+        else if (cmd == "calibrate") {
+            Serial.println("Calibrating receiver sensor...");
+            receiverSensor.calibrate();
+        }
+        else if (cmd == "help") {
+            Serial.println("=== 2-BEACON AVAILABLE COMMANDS ===");
+            Serial.println("start  - Begin measurement cycle");
+            Serial.println("stop   - Stop current measurement");
+            Serial.println("status - System status");
+            Serial.println("calibrate - Calibrate sensors");
+            Serial.println("help   - Show this help");
+        }
+        else if (cmd.length() > 0) {
+            Serial.println("Unknown command: " + cmd);
+        }
+    }
+
+    if (measurementActive && (millis() - measurementStart > TIMEOUT)) {
+        Serial.println("Measurement timeout");
+        stopMeasurement();
+    }
+
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 1000) {
         digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
-        lastLedToggle = millis();
-    }
-
-    // Автоматическая отправка START команды если измерения активны в веб-интерфейсе
-    static unsigned long lastStartCommand = 0;
-    if (webService.isMeasuring() && millis() - lastStartCommand > 2000) {
-        lastStartCommand = millis();
-        startMeasurementCycle();
-    }
-
-    // Управление объектом - отправка звуковой команды после задержки
-    if (objectSoundEnabled && (millis() - lastObjectCommand > 500)) {
-        objectSoundEnabled = false;
-        Serial.println("🔊 ОТПРАВКА КОМАНДЫ ЗВУКА ОБЪЕКТУ");
-        wifi.sendUDPBroadcast("SOUND_ON");
-    }
-
-    // Чтение значения сенсора приемника
-    static unsigned long lastSensorRead = 0;
-    if (millis() - lastSensorRead > 50) {
-        lastSensorRead = millis();
-
-        if (ultrasound.detectPulse()) {
-            unsigned long arrivalTime = micros();
-            pulseArrivalTimes[0] = arrivalTime;
-            pulseDetected[0] = true;
-
-            Serial.println("🎯 ИМПУЛЬС ОБНАРУЖЕН! Время: " + String(arrivalTime) + " мкс");
-
-            // Отправляем запрос времени маякам
-            wifi.sendUDPBroadcast("REQUEST_TIME:" + String(arrivalTime));
-        }
-    }
-
-    // Обработка входящих UDP сообщений
-    int packetSize = wifi.udp.parsePacket();
-    if (packetSize) {
-        char packet[150];
-        int len = wifi.udp.read(packet, 150);
-        if (len > 0) {
-            packet[len] = 0;
-            String message = String(packet);
-            String senderIP = wifi.udp.remoteIP().toString();
-
-            // Обработка времени от маяков
-            if (message.startsWith("BEACON_TIME:")) {
-                int beaconId = message.substring(12, 13).toInt();
-                unsigned long beaconTime = message.substring(14).toInt();
-                processBeaconTime(beaconId, beaconTime);
-            }
-            // Обработка подтверждения от объекта
-            else if (message.startsWith("OBJECT_SOUND:")) {
-                Serial.println("✅ Подтверждение от объекта: " + message);
-            }
-            // Обработка статуса от объектов
-            else if (message.startsWith("OBJECT_STATUS:")) {
-                Serial.println("📊 Статус объекта: " + message);
-            }
-            else {
-                Serial.println("📨 Сообщение от " + senderIP + ": " + message);
-            }
-        }
-    }
-
-    // Обновление веб-интерфейса
-    static unsigned long lastPositionUpdate = 0;
-    if (millis() - lastPositionUpdate > 1000) {
-        lastPositionUpdate = millis();
-
-        positioning.update();
-        Position pos = positioning.getCurrentPosition();
-
-        PositionData webPos;
-        webPos.x = pos.x;
-        webPos.y = pos.y;
-        webPos.accuracy = pos.accuracy;
-        webPos.timestamp = millis();
-        webPos.valid = (pos.accuracy < 50.0);
-
-        webService.updatePosition(webPos);
-    }
-
-    // Диагностика каждые 30 секунд
-    static unsigned long lastDiagnostic = 0;
-    if (millis() - lastDiagnostic > 30000) {
-        lastDiagnostic = millis();
-        Serial.println("\n=== 🔍 ДИАГНОСТИКА ПРИЕМНИКА ===");
-        Serial.println("   WiFi клиентов: " + String(WiFi.softAPgetStationNum()));
-        Serial.println("   IP: " + WiFi.softAPIP().toString());
-        Serial.println("   Циклов измерений: " + String(measurementCount));
-        Serial.println("   Активен цикл: " + String(measurementCycleActive ? "Да" : "Нет"));
-        Serial.println("   Измерения в веб-интерфейсе: " + String(webService.isMeasuring() ? "Вкл" : "Выкл"));
-        Serial.println("   Память: " + String(esp_get_free_heap_size()) + " байт");
+        lastBlink = millis();
     }
 
     delay(50);
 }
 
-// ===== РЕАЛИЗАЦИЯ МАЯКА =====
-#elif BEACON_NODE
+// ===== РЕАЛИЗАЦИЯ МАЯКОВ С KY-006 =====
+#elif defined(BEACON_NODE)
 
+#include <WiFi.h>
+#include <WiFiUdp.h>
 #include "config/config.h"
-#include "network/wifi_manager.h"
-#include "hardware/ultrasound.h"
 
-WiFiManager wifi;
-Ultrasound ultrasound;
+WiFiUDP udp;
+int beaconId = BEACON_ID;
 
-void testSpeaker();
-void emitSimplePulse();
+// Переменные для измерения времени
+unsigned long pulseStartTime = 0;
+bool measurementInProgress = false;
 
 void setup() {
     Serial.begin(115200);
-    delay(1000);
 
-    Serial.println("\n=== 🎯 POSITIONING SYSTEM - BEACON ===");
-    Serial.println("Beacon ID: " + String(BEACON_ID));
-
-    // Инициализация компонентов
-    Serial.println("Connecting to WiFi...");
-    wifi.setupSTA();
-
-    Serial.println("Starting UDP client...");
-    wifi.startUDP();
-
-    Serial.println("Setting up ultrasound transmitter...");
-    ultrasound.setupTransmitter();
-
-    // Тестируем динамик сразу при запуске
-    Serial.println("🔊 TEST: Initial speaker test...");
-    testSpeaker();
-
-    // Настройка пинов
+    // Настройка пинов для KY-006 (зуммер) и светодиода
+    pinMode(ULTRASOUND_TX_PIN, OUTPUT);
     pinMode(STATUS_LED_PIN, OUTPUT);
-    digitalWrite(STATUS_LED_PIN, HIGH);
+    digitalWrite(ULTRASOUND_TX_PIN, LOW);
+    digitalWrite(STATUS_LED_PIN, LOW);
 
-    Serial.println("✅ Beacon initialization completed!");
+    Serial.println("=== BEACON " + String(beaconId) + " WITH KY-006 ===");
+    Serial.println("Initializing...");
+
+    // Подключение к WiFi
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to WiFi");
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+        attempts++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        udp.begin(UDP_PORT);
+        Serial.println("\n✅ Beacon " + String(beaconId) + " ready!");
+        Serial.println("📡 IP: " + WiFi.localIP().toString());
+        Serial.println("🎵 Type: KY-006 Ultrasound Transmitter");
+        Serial.println("📊 Sensor: " + String(SENSOR_TYPE));
+        digitalWrite(STATUS_LED_PIN, HIGH);
+    } else {
+        Serial.println("\n❌ WiFi connection failed!");
+        while(1) {
+            digitalWrite(STATUS_LED_PIN, HIGH);
+            delay(100);
+            digitalWrite(STATUS_LED_PIN, LOW);
+            delay(100);
+        }
+    }
 }
 
-void testSpeaker() {
-    Serial.println("🎵 Testing speaker...");
+// Функция генерации ультразвука 40kHz для KY-006
+void emitUltrasoundPulse() {
+    Serial.println("🔊 Generating 40kHz ultrasound pulse...");
 
-    #ifdef BEACON_NODE
-    #if BEACON_ID == 1
-    Serial.println("   KY-006 Passive Buzzer Test");
-    for(int i = 0; i < 3; i++) {
+    unsigned long startTime = micros();
+    unsigned long endTime = startTime + (PULSE_DURATION * 1000);
+
+    // Генерация 40kHz сигнала (период 25μs)
+    while (micros() < endTime) {
+        digitalWrite(ULTRASOUND_TX_PIN, HIGH);
+        delayMicroseconds(12);
+        digitalWrite(ULTRASOUND_TX_PIN, LOW);
+        delayMicroseconds(12);
+    }
+
+    digitalWrite(ULTRASOUND_TX_PIN, LOW);
+    Serial.println("✅ Ultrasound pulse completed");
+}
+
+// Функция отправки времени детектирования
+void sendDetectionTime() {
+    unsigned long detectionTime = micros();
+    String message = "BEACON_TIME:" + String(beaconId) + ":" + String(detectionTime);
+
+    IPAddress receiverIP(192, 168, 4, 10);
+    udp.beginPacket(receiverIP, UDP_PORT);
+    udp.print(message);
+    udp.endPacket();
+
+    Serial.println("📤 Sent detection time: " + String(detectionTime) + " μs");
+
+    digitalWrite(STATUS_LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(STATUS_LED_PIN, LOW);
+    delay(100);
+    digitalWrite(STATUS_LED_PIN, HIGH);
+}
+
+// Функция для тестового режима - непрерывное излучение
+void testUltrasound() {
+    Serial.println("🧪 TEST MODE: Continuous ultrasound transmission");
+    Serial.println("⚠️  Press any key in Serial to stop");
+
+    unsigned long testStart = millis();
+    int pulseCount = 0;
+
+    while (!Serial.available()) {
         digitalWrite(STATUS_LED_PIN, HIGH);
-        Serial.println("   Beep " + String(i+1) + " - Generating 40kHz");
+        emitUltrasoundPulse();
+        digitalWrite(STATUS_LED_PIN, LOW);
 
+        pulseCount++;
+        if (millis() - testStart > 5000) {
+            Serial.println("🔊 Pulses emitted: " + String(pulseCount));
+            testStart = millis();
+        }
+
+        delay(500);
+    }
+
+    while (Serial.available()) Serial.read();
+    Serial.println("✅ Test mode stopped");
+}
+
+void loop() {
+    // ОБРАБОТКА ВХОДЯЩИХ UDP КОМАНД
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+        char packet[50];
+        int len = udp.read(packet, sizeof(packet)-1);
+        if (len > 0) {
+            packet[len] = 0;
+            String message = String(packet);
+            String senderIP = udp.remoteIP().toString();
+
+            Serial.println("📨 UDP from " + senderIP + ": " + message);
+
+            if (message == "START") {
+                Serial.println("🚀 START command received - beginning transmission");
+
+                int delayTime = BEACON_DELAY * beaconId;
+                Serial.println("⏰ Delay: " + String(delayTime) + "ms");
+                delay(delayTime);
+
+                Serial.println("🎵 Emitting ultrasound pulse...");
+                digitalWrite(STATUS_LED_PIN, LOW);
+                emitUltrasoundPulse();
+                digitalWrite(STATUS_LED_PIN, HIGH);
+
+                sendDetectionTime();
+
+                Serial.println("✅ Transmission sequence completed");
+            }
+            else if (message == "TEST") {
+                Serial.println("🧪 TEST command received");
+                testUltrasound();
+            }
+            else if (message == "STATUS") {
+                Serial.println("📊 STATUS command received");
+                String statusMsg = "BEACON_STATUS:" + String(beaconId) + ":KY-006:ONLINE";
+                IPAddress receiverIP(192, 168, 4, 10);
+                udp.beginPacket(receiverIP, UDP_PORT);
+                udp.print(statusMsg);
+                udp.endPacket();
+                Serial.println("📤 Status sent: " + statusMsg);
+            }
+        }
+    }
+
+    // ОБРАБОТКА SERIAL КОМАНД
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        cmd.toUpperCase();
+
+        if (cmd == "TEST" || cmd == "T") {
+            Serial.println("🎵 Manual test transmission");
+            digitalWrite(STATUS_LED_PIN, LOW);
+            emitUltrasoundPulse();
+            digitalWrite(STATUS_LED_PIN, HIGH);
+            Serial.println("✅ Manual test completed");
+        }
+        else if (cmd == "START" || cmd == "S") {
+            Serial.println("🚀 Manual start sequence");
+            digitalWrite(STATUS_LED_PIN, LOW);
+            emitUltrasoundPulse();
+            digitalWrite(STATUS_LED_PIN, HIGH);
+            sendDetectionTime();
+        }
+        else if (cmd == "CONTINUOUS" || cmd == "C") {
+            testUltrasound();
+        }
+        else if (cmd == "STATUS" || cmd == "INFO") {
+            Serial.println("=== BEACON " + String(beaconId) + " STATUS ===");
+            Serial.println("🔧 ID: " + String(beaconId));
+            Serial.println("🎵 Type: KY-006 Ultrasound Transmitter");
+            Serial.println("📡 IP: " + WiFi.localIP().toString());
+            Serial.println("📶 WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+            Serial.println("🔌 Transmitter Pin: " + String(ULTRASOUND_TX_PIN));
+            Serial.println("💡 Status LED Pin: " + String(STATUS_LED_PIN));
+            Serial.println("⏰ Pulse Duration: " + String(PULSE_DURATION) + "ms");
+            Serial.println("🔄 Uptime: " + String(millis()/1000) + "s");
+        }
+        else if (cmd == "HELP" || cmd == "H") {
+            Serial.println("=== BEACON " + String(beaconId) + " COMMANDS ===");
+            Serial.println("TEST/t       - Single ultrasound pulse");
+            Serial.println("START/s      - Pulse + send detection time");
+            Serial.println("CONTINUOUS/c - Continuous test mode");
+            Serial.println("STATUS/info  - System information");
+            Serial.println("HELP/h       - This help message");
+        }
+        else if (cmd == "RESTART" || cmd == "R") {
+            Serial.println("🔄 Restarting beacon...");
+            ESP.restart();
+        }
+        else if (cmd.length() > 0) {
+            Serial.println("❌ Unknown command: " + cmd);
+            Serial.println("💡 Type 'HELP' for available commands");
+        }
+    }
+
+    // АВТОНОМНЫЙ РЕЖИМ
+    static unsigned long lastAutoPulse = 0;
+    if (!measurementInProgress && (millis() - lastAutoPulse > 10000)) {
+        lastAutoPulse = millis();
+        Serial.println("🔊 Auto test pulse");
+        digitalWrite(STATUS_LED_PIN, LOW);
+        emitUltrasoundPulse();
+        digitalWrite(STATUS_LED_PIN, HIGH);
+    }
+
+    // ИНДИКАЦИЯ РАБОТЫ
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 2000) {
+        digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+        lastBlink = millis();
+    }
+
+    delay(50);
+}
+
+// ===== РЕАЛИЗАЦИЯ ОБЪЕКТА =====
+#elif defined(OBJECT_NODE)
+
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include "config/config.h"
+
+WiFiUDP udp;
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(ULTRASOUND_TX_PIN, OUTPUT);
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(ULTRASOUND_TX_PIN, LOW);
+    digitalWrite(STATUS_LED_PIN, LOW);
+
+    Serial.println("Object node initializing...");
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to WiFi");
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+        delay(500);
+        Serial.print(".");
+        digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+        attempts++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        udp.begin(UDP_PORT);
+        Serial.println("\nObject node ready!");
+        Serial.println("IP: " + WiFi.localIP().toString());
+        Serial.println("Type: " + String(SENSOR_TYPE));
+        digitalWrite(STATUS_LED_PIN, HIGH);
+    } else {
+        Serial.println("\nWiFi connection failed!");
+    }
+}
+
+void emitObjectPulse() {
+    for (int i = 0; i < OBJECT_ID; i++) {
         unsigned long startTime = micros();
-        while (micros() - startTime < 200000) {
+
+        while (micros() - startTime < PULSE_DURATION * 1000) {
             digitalWrite(ULTRASOUND_TX_PIN, HIGH);
             delayMicroseconds(12);
             digitalWrite(ULTRASOUND_TX_PIN, LOW);
             delayMicroseconds(12);
         }
 
-        digitalWrite(STATUS_LED_PIN, LOW);
-        delay(200);
+        if (i < OBJECT_ID - 1) {
+            delay(BETWEEN_PULSE_DELAY);
+        }
     }
-
-    #elif BEACON_ID == 2
-    Serial.println("   KY-012 Active Buzzer Test");
-    for(int i = 0; i < 3; i++) {
-        digitalWrite(STATUS_LED_PIN, HIGH);
-        Serial.println("   Beep " + String(i+1) + " - PWM 40kHz");
-
-        ledcWrite(0, 127);
-        delay(200);
-        ledcWrite(0, 0);
-
-        digitalWrite(STATUS_LED_PIN, LOW);
-        delay(200);
-    }
-    #endif
-    #endif
-
-    Serial.println("✅ Speaker test completed");
 }
 
-void emitSimplePulse() {
-    Serial.println("🔊 EMITTING ULTRASOUND PULSE");
+void sendObjectTime() {
+    unsigned long currentTime = micros();
+    String message = "OBJECT_TIME:" + String(currentTime);
 
-    #ifdef BEACON_NODE
-    #if BEACON_ID == 1
-    Serial.println("   KY-006: Software 40kHz generation");
-    unsigned long startTime = micros();
-    long cycleCount = 0;
+    IPAddress receiverIP(192, 168, 4, 10);
+    udp.beginPacket(receiverIP, UDP_PORT);
+    udp.print(message);
+    udp.endPacket();
 
-    while (micros() - startTime < 100000) {
-        digitalWrite(ULTRASOUND_TX_PIN, HIGH);
-        delayMicroseconds(12);
-        digitalWrite(ULTRASOUND_TX_PIN, LOW);
-        delayMicroseconds(12);
-        cycleCount++;
-    }
-    Serial.println("   Generated " + String(cycleCount) + " cycles");
-
-    #elif BEACON_ID == 2
-    Serial.println("   KY-012: PWM 40kHz");
-    ledcWrite(0, 127);
-    delay(100);
-    ledcWrite(0, 0);
-    Serial.println("   PWM tone completed");
-    #endif
-    #endif
+    Serial.println("Sent object time: " + String(currentTime) + " μs");
 }
 
 void loop() {
-    static unsigned long lastLedToggle = 0;
-    if (millis() - lastLedToggle > 1000) {
-        digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
-        lastLedToggle = millis();
-    }
-
-    int packetSize = wifi.udp.parsePacket();
+    int packetSize = udp.parsePacket();
     if (packetSize) {
-        char packet[100];
-        int len = wifi.udp.read(packet, 100);
+        char packet[50];
+        int len = udp.read(packet, sizeof(packet)-1);
         if (len > 0) {
             packet[len] = 0;
             String message = String(packet);
-            String senderIP = wifi.udp.remoteIP().toString();
+            String senderIP = udp.remoteIP().toString();
 
-            Serial.println("=== 📨 UDP MESSAGE RECEIVED ===");
-            Serial.println("   From: " + senderIP);
-            Serial.println("   Message: " + message);
-            Serial.println("   Length: " + String(len));
+            Serial.println("Command from " + senderIP + ": " + message);
 
             if (message == "START") {
-                Serial.println("🚀 START COMMAND RECEIVED - EMITTING SOUND!");
+                Serial.println("Starting object transmission");
+                delay(MEASUREMENT_DELAY);
 
-                for(int i = 0; i < 5; i++) {
-                    digitalWrite(STATUS_LED_PIN, HIGH);
-                    delay(100);
-                    digitalWrite(STATUS_LED_PIN, LOW);
-                    delay(100);
-                }
+                digitalWrite(STATUS_LED_PIN, LOW);
+                emitObjectPulse();
+                digitalWrite(STATUS_LED_PIN, HIGH);
 
-                int delayTime = 100 + (BEACON_ID * 100);
-                Serial.println("⏳ Waiting " + String(delayTime) + "ms before sound...");
-                delay(delayTime);
-
-                Serial.println("🔊 EMITTING ULTRASOUND PULSE...");
-                emitSimplePulse();
-
-                Serial.println("✅ Ultrasound emission completed");
-
-                unsigned long currentTime = micros();
-                String ackMessage = "BEACON_TIME:" + String(BEACON_ID) + ":" + String(currentTime);
-                wifi.sendUDPBroadcast(ackMessage);
-                Serial.println("📤 Sent time: " + ackMessage);
-
-            } else {
-                Serial.println("❓ Unknown command: " + message);
+                sendObjectTime();
+                Serial.println("Object transmission completed");
             }
         }
     }
 
-    static unsigned long lastDiagnostic = 0;
-    if (millis() - lastDiagnostic > 10000) {
-        lastDiagnostic = millis();
-        Serial.println("=== 🔍 BEACON DIAGNOSTIC ===");
-        Serial.println("   WiFi: " + String(WiFi.SSID()) + " (" + String(WiFi.RSSI()) + "dBm)");
-        Serial.println("   IP: " + WiFi.localIP().toString());
-        Serial.println("   Status: Waiting for START command");
-        Serial.println("   Beacon ID: " + String(BEACON_ID));
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+
+        if (cmd == "test" || cmd == "t") {
+            Serial.println("Manual object test");
+            digitalWrite(STATUS_LED_PIN, LOW);
+            emitObjectPulse();
+            digitalWrite(STATUS_LED_PIN, HIGH);
+        }
+        else if (cmd == "status" || cmd == "s") {
+            Serial.println("=== OBJECT STATUS ===");
+            Serial.println("Type: " + String(SENSOR_TYPE));
+            Serial.println("IP: " + WiFi.localIP().toString());
+            Serial.println("Pulse pattern: " + String(OBJECT_ID) + " pulses");
+            Serial.println("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+        }
     }
 
-    static unsigned long lastWifiCheck = 0;
-    if (millis() - lastWifiCheck > 10000) {
-        lastWifiCheck = millis();
-        if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("🔄 WiFi reconnecting...");
-            wifi.setupSTA();
-        }
+    static unsigned long lastAutoPulse = 0;
+    if (millis() - lastAutoPulse > OBJECT_PULSE_INTERVAL) {
+        lastAutoPulse = millis();
+        Serial.println("Auto object pulse");
+        digitalWrite(STATUS_LED_PIN, LOW);
+        emitObjectPulse();
+        digitalWrite(STATUS_LED_PIN, HIGH);
+    }
+
+    static unsigned long lastBlink = 0;
+    if (millis() - lastBlink > 1000) {
+        digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
+        lastBlink = millis();
     }
 
     delay(100);
 }
 
-// ===== РЕАЛИЗАЦИЯ ОБЪЕКТА =====
-#elif OBJECT_NODE
-
-#include <WiFi.h>
-#include <WiFiUdp.h>
-
-#define SOUND_PIN 25
-#define STATUS_LED_PIN 2
-#define UDP_PORT 1234
-#define PULSE_DURATION 15
-#define OBJECT_ID 3
-#define BETWEEN_PULSE_DELAY 10
-
-WiFiUDP udp;
-unsigned long lastSoundTime = 0;
-int soundCount = 0;
-
-void setupWiFi() {
-  Serial.println("📡 Подключение к WiFi...");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi подключен!");
-    Serial.print("📶 IP: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(STATUS_LED_PIN, HIGH);
-  } else {
-    Serial.println("\n❌ Ошибка подключения к WiFi!");
-    digitalWrite(STATUS_LED_PIN, LOW);
-  }
-}
-
-void emitSinglePulse() {
-  unsigned long startTime = micros();
-
-  while (micros() - startTime < PULSE_DURATION * 1000) {
-    digitalWrite(SOUND_PIN, HIGH);
-    delayMicroseconds(12);
-    digitalWrite(SOUND_PIN, LOW);
-    delayMicroseconds(12);
-  }
-}
-
-void emitCodedSound() {
-  soundCount++;
-  Serial.println("🎵 ИСПУСКАЮ КОДИРОВАННЫЙ ЗВУК - ID: " + String(OBJECT_ID));
-  digitalWrite(STATUS_LED_PIN, HIGH);
-
-  for (int i = 0; i < OBJECT_ID; i++) {
-    Serial.println("   🔊 Импульс " + String(i+1) + "/" + String(OBJECT_ID));
-    emitSinglePulse();
-
-    if (i < OBJECT_ID - 1) {
-      delay(BETWEEN_PULSE_DELAY);
-    }
-  }
-
-  digitalWrite(STATUS_LED_PIN, LOW);
-  lastSoundTime = millis();
-  Serial.println("✅ Звуковой сигнал завершен");
-}
-
-void sendSoundConfirmation() {
-  String ack = "OBJECT_SOUND:" + String(millis()) + ":COUNT:" + String(soundCount);
-
-  IPAddress broadcastIP(192, 168, 4, 255);
-  udp.beginPacket(broadcastIP, UDP_PORT);
-  udp.print(ack);
-  udp.endPacket();
-
-  Serial.println("📤 Отправлено подтверждение: " + ack);
-}
-
-void setup() {
-  Serial.begin(115200);
-  pinMode(SOUND_PIN, OUTPUT);
-  pinMode(STATUS_LED_PIN, OUTPUT);
-  digitalWrite(SOUND_PIN, LOW);
-  digitalWrite(STATUS_LED_PIN, LOW);
-
-  delay(1000);
-
-  Serial.println("\n=== 🎯 ESP32 ОБЪЕКТ СО ЗВУКОМ ===");
-  Serial.println("🔊 Прямое управление звуком: GPIO25 → BC547 → PAM8403");
-  Serial.println("📍 Идентификатор: " + String(OBJECT_ID) + " импульсов");
-  Serial.println("📡 Сеть: " + String(WIFI_SSID));
-
-  setupWiFi();
-  udp.begin(UDP_PORT);
-
-  Serial.println("\n🔊 ТЕСТ ПРИ ЗАПУСКЕ...");
-  emitCodedSound();
-  sendSoundConfirmation();
-
-  Serial.println("\n✅ Объект инициализирован!");
-  Serial.println("🎯 Ожидание UDP команд на порту " + String(UDP_PORT));
-}
-
-void loop() {
-  static unsigned long lastBlink = 0;
-  if (millis() - lastBlink > 1000) {
-    digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
-    lastBlink = millis();
-  }
-
-  int packetSize = udp.parsePacket();
-  if (packetSize) {
-    char packet[100];
-    int len = udp.read(packet, sizeof(packet) - 1);
-    if (len > 0) {
-      packet[len] = 0;
-      String message = String(packet);
-      String senderIP = udp.remoteIP().toString();
-
-      Serial.println("\n📨 UDP ОТ " + senderIP + ": " + message);
-
-      if (message == "START" || message == "SOUND_ON" || message == "SOUND") {
-        Serial.println("🚀 КОМАНДА ЗВУКА ПОЛУЧЕНА - ИСПУСКАЮ ЗВУК");
-        emitCodedSound();
-        sendSoundConfirmation();
-      }
-      else if (message == "STATUS") {
-        Serial.println("📊 ЗАПРОС СТАТУСА");
-        String status = "OBJECT_STATUS:ID=" + String(OBJECT_ID) +
-                       ",IP=" + WiFi.localIP().toString() +
-                       ",RSSI=" + String(WiFi.RSSI()) +
-                       ",COUNT=" + String(soundCount);
-        udp.beginPacket(udp.remoteIP(), UDP_PORT);
-        udp.print(status);
-        udp.endPacket();
-        Serial.println("📤 Отправлен статус: " + status);
-      }
-    }
-  }
-
-  static unsigned long lastDiagnostic = 0;
-  if (millis() - lastDiagnostic > 30000) {
-    lastDiagnostic = millis();
-    Serial.println("=== 🔍 ДИАГНОСТИКА ОБЪЕКТА ===");
-    Serial.println("   WiFi: " + String(WiFi.SSID()) + " (" + String(WiFi.RSSI()) + "dBm)");
-    Serial.println("   IP: " + WiFi.localIP().toString());
-    Serial.println("   Всего сигналов: " + String(soundCount));
-    Serial.println("   Последний сигнал: " + String((millis() - lastSoundTime) / 1000) + " сек назад");
-  }
-
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-
-    if (command == "TEST" || command == "T") {
-      Serial.println("🔊 РУЧНОЙ ТЕСТ");
-      emitCodedSound();
-      sendSoundConfirmation();
-    }
-    else if (command == "STATUS" || command == "S") {
-      Serial.println("=== СТАТУС ОБЪЕКТА ===");
-      Serial.println("Пин звука: GPIO" + String(SOUND_PIN));
-      Serial.println("ID объекта: " + String(OBJECT_ID) + " импульсов");
-      Serial.println("WiFi: " + String(WiFi.SSID()));
-      Serial.println("Сигналов отправлено: " + String(soundCount));
-    }
-    else if (command == "WIFI" || command == "W") {
-      Serial.println("🔄 Переподключение WiFi...");
-      setupWiFi();
-    }
-  }
-
-  delay(100);
-}
-
 #else
-#error "Please define either RECEIVER_NODE, BEACON_NODE or OBJECT_NODE in build flags"
+#error "Please define RECEIVER_NODE, BEACON_NODE or OBJECT_NODE in build flags"
 #endif

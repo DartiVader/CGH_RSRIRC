@@ -4,8 +4,6 @@
 // ====================
 // БАЗОВЫЕ НАСТРОЙКИ ПИНОВ
 // ====================
-
-// Пины по умолчанию (для ESP32 узлов)
 #ifndef STATUS_LED_PIN
 #define STATUS_LED_PIN 2
 #endif
@@ -44,57 +42,81 @@
 // СТРУКТУРЫ ДАННЫХ
 // ====================
 struct PositionData {
-    float x = 0;              // X координата (см)
-    float y = 0;              // Y координата (см)
-    float accuracy = 0;       // Точность (см)
-    uint32_t timestamp = 0;   // Метка времени
-    bool valid = false;       // Валидность данных
+    float x = 0;
+    float y = 0;
+    float accuracy = 0;
+    uint32_t timestamp = 0;
+    bool valid = false;
 };
 
 // ====================
 // ФИЗИЧЕСКИЕ ПАРАМЕТРЫ
 // ====================
-#define SOUND_SPEED 34300.0  // см/с
+#define SOUND_SPEED 34300.0
+
+// ====================
+// ПОЗИЦИИ УЗЛОВ (см)
+// ====================
+#define RECEIVER_X 0
+#define RECEIVER_Y 0
+
+#define BEACON1_X -200
+#define BEACON1_Y 300
+
+#define BEACON2_X 200
+#define BEACON2_Y 300
+
+#define BEACON3_X 0
+#define BEACON3_Y 0
+
+// ====================
+// ТАЙМИНГИ (мс)
+// ====================
+#define BEACON_DELAY 200
+#define MEASUREMENT_DELAY 100
+#define PULSE_DURATION 10
+#define TIMEOUT 10000
 
 // ====================
 // КОНФИГУРАЦИИ УЗЛОВ
 // ====================
 
 #ifdef RECEIVER_NODE
-// КОНФИГУРАЦИЯ ПРИЕМНИКА (ESP32)
+// КОНФИГУРАЦИЯ ПРИЕМНИКА
 #define SENSOR_TYPE "KY-037"
 #define NODE_TYPE "RECEIVER"
+#define SENSOR_PIN 35
 
-#elif BEACON_NODE
-// КОНФИГУРАЦИЯ МАЯКОВ (ESP32)
-  #if BEACON_ID == 1
-  #define SENSOR_TYPE "KY-006+KY-037"
-  #define NODE_TYPE "BEACON_1"
-  #elif BEACON_ID == 2
-  #define SENSOR_TYPE "KY-012+KY-038"
-  #define NODE_TYPE "BEACON_2"
-  #endif
+#elif defined(BEACON_NODE)
+// КОНФИГУРАЦИЯ МАЯКОВ
+#if BEACON_ID == 1
+#define SENSOR_TYPE "KY-006"  // ИСПРАВЛЕНО
+#define NODE_TYPE "BEACON_1"
+#define SENSOR_PIN 34
+#elif BEACON_ID == 2
+#define SENSOR_TYPE "KY-006"  // ИСПРАВЛЕНО
+#define NODE_TYPE "BEACON_2"
+#define SENSOR_PIN 36
+#endif
 
-#elif OBJECT_NODE
-// КОНФИГУРАЦИЯ ОБЪЕКТА (Arduino Uno с усилителем)
+#elif defined(OBJECT_NODE)
+// КОНФИГУРАЦИЯ ОБЪЕКТА
 #define SENSOR_TYPE "DYNAMIC+PAM8403"
 #define NODE_TYPE "OBJECT"
+
+// Параметры ультразвуковых импульсов объекта
+#define PULSE_DURATION 15
+#define BETWEEN_PULSE_DELAY 10
+#define OBJECT_ID 3
+#define OBJECT_PULSE_INTERVAL 2000
 
 // Переопределяем пины для Arduino Uno
 #undef STATUS_LED_PIN
 #undef ULTRASOUND_TX_PIN
 
 #define STATUS_LED_PIN 13
-#define ULTRASOUND_TX_PIN 8     // Подключен к L усилителя
-
-// Параметры ультразвуковых импульсов
-#define PULSE_DURATION 15       // длительность импульса в мс
-#define BETWEEN_PULSE_DELAY 10  // задержка между импульсами в мс
-
-// Идентификация объекта
-#define OBJECT_ID 3             // 3 импульса для идентификации
-#define OBJECT_PULSE_INTERVAL 2000  // 2 секунды между импульсами (в миллисекундах)
+#define ULTRASOUND_TX_PIN 8
 
 #endif
 
-#endif
+#endif // CONFIG_H

@@ -23,6 +23,11 @@ public:
     void emitSimplePulses(int beaconId);
     void emitPWMPulses(int beaconId);
 
+    void emitMaxVolumeSound();
+    void emitTestSound();
+
+
+
 private:
     unsigned long pulseStartTime = 0;
     bool receiverEnabled = false;
